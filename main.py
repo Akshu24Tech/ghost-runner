@@ -1,28 +1,63 @@
-import os
+"""
+main.py — the poll loop. Nothing else.
+
+Responsibilities:
+  1. Poll Telegram for updates
+  2. Auth gate: silently drop messages from unknown chat IDs
+  3. Route authorised text through router.route()
+  4. Send the reply back via telegram.send_message()
+
+Why silence on auth failure: replying "not authorised" tells a stranger
+the bot is alive and listening. Silence reveals nothing.
+"""
 import time
-import httpx
-from dotenv import load_dotenv
+import logging
 
-load_dotenv()
+from bot.config import ALLOWED_CHAT_ID
+from bot import telegram
+from bot.router import route
 
-TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
-API = f"https://api.telegram.org/bot{TOKEN}"
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+)
+log = logging.getLogger(__name__)
 
 offset = 0
 
-while True:
-    resp = httpx.get(f"{API}/getUpdates", params={"offset": offset})
-    updates = resp.json()["result"]
+log.info("Ghost Runner started. Authorised chat: %d", ALLOWED_CHAT_ID)
 
-    for update in updates:
-        offset = update["update_id"] + 1
-        message = update.get("message")
-        if not message:
-            continue
-        text = message.get("text")
-        if not text:
-            continue
-        
-        chat_id = message["chat"]["id"]
-        httpx.post(f"{API}/sendMessage", params={"chat_id": chat_id, "text": text})
+while True:
+    try:
+        updates = telegram.get_updates(offset)
+
+        for update in updates:
+            offset = update["update_id"] + 1
+
+            message = update.get("message")
+            if not message:
+                continue
+
+            text = message.get("text")
+            if not text:
+                continue
+
+            chat_id: int = message["chat"]["id"]
+
+            # ── AUTH GATE ─────────────────────────────────────────────────
+            if chat_id != ALLOWED_CHAT_ID:
+                log.warning("Blocked message from unknown chat_id=%d", chat_id)
+                continue  # silent — no reply
+            # ─────────────────────────────────────────────────────────────
+
+            reply = route(text)
+            telegram.send_message(chat_id, reply)
+            log.info("chat=%d | in=%r | out=%r", chat_id, text, reply)
+
+    except Exception as exc:
+        # Network blip, Telegram hiccup, etc. — log and keep looping.
+        log.error("Poll error (will retry in 5 s): %s", exc)
+        time.sleep(5)
+        continue
+
     time.sleep(1)
