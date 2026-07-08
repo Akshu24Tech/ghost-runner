@@ -1,15 +1,3 @@
-"""
-main.py — the poll loop. Nothing else.
-
-Responsibilities:
-  1. Poll Telegram for updates
-  2. Auth gate: silently drop messages from unknown chat IDs
-  3. Route authorised text through router.route()
-  4. Send the reply back via telegram.send_message()
-
-Why silence on auth failure: replying "not authorised" tells a stranger
-the bot is alive and listening. Silence reveals nothing.
-"""
 import time
 import logging
 
